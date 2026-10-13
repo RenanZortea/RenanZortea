@@ -7,7 +7,6 @@ ROOT = Path(__file__).resolve().parent
 OUT = ROOT / 'assets'
 OUT.mkdir(exist_ok=True)
 FONT = ImageFont.truetype('/usr/share/fonts/TTF/FiraCodeNerdFont-Retina.ttf', 14)
-HEBREW_FONT = ImageFont.truetype('/usr/share/fonts/liberation/LiberationSerif-Regular.ttf', 28)
 # Hand-drawn, deliberately low-resolution continent silhouettes (longitude, latitude).
 LAND = [
  [(-168,70),(-140,72),(-125,60),(-110,57),(-95,72),(-60,53),(-80,26),(-98,17),(-112,30),(-128,50),(-160,60)],
@@ -40,26 +39,50 @@ for row in range(39):
         lon=math.atan2(x,z)
         light=max(.15, -.35*x-.25*y+.85*z)
         points.append((col,row,lat,lon,light))
+# Indexed drawing keeps all empty pixels truly transparent (including between glyphs).
+# Separate monochrome palettes keep the artwork readable in both GitHub themes.
+palette_dark = [0,0,0, 245,245,245, 115,115,115, 165,165,165] + [0,0,0]*252
+palette_light = [255,255,255, 25,25,25, 155,155,155, 95,95,95] + [0,0,0]*252
+
+def distant_bodies(draw):
+    # Small static ASCII sun, with eight detached rays.
+    cx, cy = 837, 100
+    for row in range(-3,4):
+        for col in range(-5,6):
+            r=(col*9)**2+(row*15)**2
+            if r < 39**2:
+                draw.text((cx+col*9,cy+row*15),'*' if r>25**2 else '@',font=FONT,fill=3,anchor='mm')
+    for dx,dy,char in [(0,-61,'|'),(0,61,'|'),(-63,0,'-'),(63,0,'-'),(-48,-48,'\\'),(48,48,'\\'),(48,-48,'/'),(-48,48,'/')]:
+        draw.text((cx+dx,cy+dy),char,font=FONT,fill=3,anchor='mm')
+    # Crescent formed by subtracting an offset circle from a disk.
+    cx, cy = 118, 655
+    for row in range(-3,4):
+        for col in range(-5,6):
+            x,y=col*9,row*15
+            if x*x+y*y < 43**2 and (x-22)**2+(y+9)**2 > 39**2:
+                draw.text((cx+x,cy+y),'+' if x<-27 else '*',font=FONT,fill=3,anchor='mm')
+
 frames=[]
 for frame in range(96):
-    im=Image.new('RGB',(720,720),'#000000')
+    im=Image.new('P',(960,760),0)
+    im.putpalette(palette_dark)
     draw=ImageDraw.Draw(im)
+    distant_bodies(draw)
     phase=2*math.pi*frame/96
     for col,row,lat,lon,light in points:
         longitude=(math.degrees(lon+phase)+180)%360-180
         land=mask.getpixel((int((longitude+180)*2)%720,min(359,int(180-math.degrees(lat)*2))))
-        if land:
-            char=':+*#%@'[min(5,int(light*6))]
-            color=(255,255,255)
-        else:
-            char='.' if light<.65 else ':'
-            color=(110,110,110)
-        draw.text((81+col*9,34+row*15),char,font=FONT,fill=color)
-    draw.text((360,655),'אברא כדברא',font=HEBREW_FONT,fill='white',anchor='mm',direction='rtl')
+        char=':+*#%@'[min(5,int(light*6))] if land else ('.' if light<.65 else ':')
+        draw.text((480+(col-31)*9,380+(row-19)*15),char,font=FONT,fill=1 if land else 2,anchor='mm')
     frames.append(im)
-# A single shared palette avoids flicker during rotation.
-palette=frames[0].quantize(colors=64)
-encoded=[f.quantize(palette=palette,dither=Image.Dither.NONE) for f in frames]
-encoded[0].save(OUT/'ascii-globe.gif',save_all=True,append_images=encoded[1:],duration=80,loop=0,optimize=False,disposal=1)
-frames[0].save(OUT/'ascii-globe-preview.png')
-print(f'Generated {len(frames)} frames: {(OUT / "ascii-globe.gif").stat().st_size:,} bytes')
+
+for name,palette in [('ascii-globe.gif',palette_dark),('ascii-globe-light.gif',palette_light)]:
+    for im in frames:
+        im.putpalette(palette)
+    # Clear each previous frame to transparent, avoiding trails from moving continents.
+    frames[0].save(OUT/name,save_all=True,append_images=frames[1:],duration=80,
+                   loop=0,optimize=False,disposal=2,transparency=0)
+    print(f'Generated {name}: {(OUT/name).stat().st_size:,} bytes')
+frames[0].putpalette(palette_dark)
+frames[0].info['transparency']=0
+frames[0].convert('RGBA').save(OUT/'ascii-globe-preview.png')
